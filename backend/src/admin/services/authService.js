@@ -105,6 +105,7 @@ export const authService = {
     if (!admin || !admin.isActive) {
       return {
         message: 'If an active account exists with that email, a password reset link has been sent.',
+        ...(env.isDevelopment ? { debugToken: resetToken, debugResetUrl: resetUrl } : {}),
       };
     }
 
@@ -142,8 +143,6 @@ export const authService = {
 
     return {
       message: 'If an active account exists with that email, a password reset link has been sent.',
-      // In dev environment when testing locally, provide token for testing ease
-      ...(env.isDevelopment ? { debugToken: resetToken, debugResetUrl: resetUrl } : {}),
     };
   },
 
@@ -155,8 +154,8 @@ export const authService = {
       throw AppError.badRequest('Reset token is required');
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      throw AppError.badRequest('New password must be at least 6 characters long');
+    if (!newPassword || newPassword.length < 12) {
+      throw AppError.badRequest('New password must be at least 12 characters long');
     }
 
     if (newPassword !== confirmPassword) {
@@ -217,8 +216,8 @@ export const authService = {
    * Change Password (for logged-in admin)
    */
   async changePassword({ adminId, currentPassword, newPassword, confirmPassword, ipAddress }) {
-    if (!newPassword || newPassword.length < 6) {
-      throw AppError.badRequest('New password must be at least 6 characters long');
+    if (!newPassword || newPassword.length < 12) {
+      throw AppError.badRequest('New password must be at least 12 characters long');
     }
 
     if (newPassword !== confirmPassword) {

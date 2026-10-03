@@ -1,5 +1,6 @@
 "use client";
 
+import { API_BASE_URL } from '@/lib/api/url';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -168,7 +169,7 @@ export default function ProductDetailPage({ slug }) {
       setLoading(true);
       setError(null);
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/products/${slug}`);
         if (!res.ok) throw new Error('Product not found');
         const data = await res.json();

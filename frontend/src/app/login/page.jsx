@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useDispatch } from 'react-redux';
 import { signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from '@/lib/firebase/config';
+import { auth, firebaseConfigured, googleProvider } from '@/lib/firebase/config';
 import { customerApi } from '@/lib/api/customer';
 import { setCustomerSession, getStoredCustomerToken } from '@/lib/auth/session';
 import { setCustomer } from '@/store/slices/authSlice';
@@ -36,6 +36,11 @@ function CustomerLoginContent() {
   }, [router, redirectUrl]);
 
   const handleGoogleLogin = async () => {
+    if (!firebaseConfigured || !auth || !googleProvider) {
+      setError('Google sign-in is not configured for this deployment.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -131,6 +136,7 @@ function CustomerLoginContent() {
             onGoogleLogin={handleGoogleLogin}
             loading={loading}
             error={error}
+            googleLoginEnabled={firebaseConfigured}
           />
         </div>
       </main>

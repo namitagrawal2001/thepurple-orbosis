@@ -10,28 +10,35 @@ import logger from '../config/logger.js';
  */
 export async function bootstrapSuperAdmin() {
   try {
-    const email = (env.ADMIN_INITIAL_EMAIL || 'superadmin@gmail.com').toLowerCase().trim();
-    const initialPassword = env.ADMIN_INITIAL_PASSWORD || '123456';
-
-    const salt = await bcrypt.genSalt(12);
-    const passwordHash = await bcrypt.hash(initialPassword, salt);
+    const email = env.ADMIN_INITIAL_EMAIL.toLowerCase().trim();
 
     let superAdmin = await Admin.findOne({
       where: { email },
     });
 
     if (superAdmin) {
-      await superAdmin.update({
-        name: superAdmin.name || 'Super Admin',
-        passwordHash,
-        role: ADMIN_ROLES.SUPER_ADMIN,
-        isActive: true,
-        isEmailVerified: true,
-        mustChangePassword: false,
-      });
-      logger.info(`Super Admin account refreshed (${superAdmin.email}) with credentials.`);
+      if (
+        !superAdmin.mustChangePassword &&
+        (await bcrypt.compare('123456', superAdmin.passwordHash))
+      ) {
+        await superAdmin.update({ mustChangePassword: true });
+        logger.warn(`Super Admin account (${superAdmin.email}) must change its legacy default password.`);
+      } else {
+        logger.info(`Existing Super Admin account preserved (${superAdmin.email}).`);
+      }
       return superAdmin;
     }
+
+    if (!env.ADMIN_INITIAL_PASSWORD) {
+      const error = new Error(
+        'ADMIN_INITIAL_PASSWORD is required to create the initial Super Admin account.'
+      );
+      error.code = 'ADMIN_INITIAL_PASSWORD_REQUIRED';
+      throw error;
+    }
+
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(env.ADMIN_INITIAL_PASSWORD, salt);
 
     superAdmin = await Admin.create({
       name: 'Super Admin',
@@ -40,7 +47,7 @@ export async function bootstrapSuperAdmin() {
       role: ADMIN_ROLES.SUPER_ADMIN,
       isActive: true,
       isEmailVerified: true,
-      mustChangePassword: false,
+      mustChangePassword: true,
     });
 
     logger.info(`Super Admin account successfully bootstrapped (${superAdmin.email}) with role [${ADMIN_ROLES.SUPER_ADMIN}]`);

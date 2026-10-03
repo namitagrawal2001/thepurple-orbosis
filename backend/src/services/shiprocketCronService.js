@@ -6,6 +6,7 @@ import { Op } from 'sequelize';
 class ShiprocketCronService {
   constructor() {
     this.intervalHandle = null;
+    this.initialRunTimeout = null;
     this.isRunning = false;
     this.lastRunStats = null;
   }
@@ -124,7 +125,8 @@ class ShiprocketCronService {
     logger.info(`⏰ [Shiprocket Cron] Starting periodic tracking sync scheduler (Every ${minutes} minute(s))`);
 
     // Initial background run 30 seconds after server starts
-    setTimeout(() => {
+    this.initialRunTimeout = setTimeout(() => {
+      this.initialRunTimeout = null;
       this.syncAllActiveShipments().catch((e) => {
         logger.warn(`[Shiprocket Cron] Initial run notice: ${e.message}`);
       });
@@ -141,6 +143,10 @@ class ShiprocketCronService {
    * Stop background scheduler
    */
   stopCronJob() {
+    if (this.initialRunTimeout) {
+      clearTimeout(this.initialRunTimeout);
+      this.initialRunTimeout = null;
+    }
     if (this.intervalHandle) {
       clearInterval(this.intervalHandle);
       this.intervalHandle = null;

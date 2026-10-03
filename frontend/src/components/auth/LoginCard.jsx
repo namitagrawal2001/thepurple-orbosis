@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { ShoppingBag, Heart, Bell, ChevronRight, Loader2, AlertCircle } from 'lucide-react';
 
-export default function LoginCard({ onGoogleLogin, loading, error }) {
+export default function LoginCard({ onGoogleLogin, loading, error, googleLoginEnabled = true }) {
   return (
     <div
       className="login-glass-card"
@@ -118,7 +118,7 @@ export default function LoginCard({ onGoogleLogin, loading, error }) {
 
       <button
         type="button"
-        disabled={loading}
+        disabled={loading || !googleLoginEnabled}
         onClick={onGoogleLogin}
         style={{
           width: '100%',
@@ -182,7 +182,7 @@ export default function LoginCard({ onGoogleLogin, loading, error }) {
             fontFamily: "var(--font-heading, 'Outfit', sans-serif)",
           }}
         >
-          {loading ? 'Signing you in...' : 'Continue with Google'}
+          {loading ? 'Signing you in...' : googleLoginEnabled ? 'Continue with Google' : 'Google sign-in unavailable'}
         </span>
 
         <div style={{ width: '22px', display: 'flex', justifyContent: 'flex-end', color: 'var(--muted-text, #8B8795)' }}>

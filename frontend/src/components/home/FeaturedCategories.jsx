@@ -1,5 +1,6 @@
 'use client';
 
+import { API_BASE_URL } from '@/lib/api/url';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, ArrowRight } from 'lucide-react';
@@ -62,7 +63,7 @@ export default function FeaturedCategories() {
     let isMounted = true;
     async function fetchStoreCategories() {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/categories`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.categories) && isMounted) {

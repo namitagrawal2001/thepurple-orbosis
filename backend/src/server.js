@@ -1,16 +1,15 @@
 import env from './config/env.js';
 import logger from './config/logger.js';
 import createApp from './app.js';
-import sequelize, { checkDatabaseHealth } from './config/database.js';
+import sequelize from './config/database.js';
+import { checkDatabaseHealth } from './config/database.js';
 import { checkRedisHealth } from './config/redis.js';
 import { checkMeiliHealth } from './config/meilisearch.js';
 import { workerService } from './services/workerService.js';
 import { queueService } from './services/queueService.js';
-import { redisService } from './services/redisService.js';
+import { closeRedis } from './config/redis.js';
 import { shiprocketCronService } from './services/shiprocketCronService.js';
 import bootstrapSuperAdmin from './seeders/bootstrapAdmin.js';
-import { syncProductDiscounts } from './utils/syncProductDiscounts.js';
-import { ProductInterest, ContactQuery } from './models/index.js';
 import './models/index.js'; // Register models & associations
 
 const app = createApp();
@@ -29,49 +28,11 @@ const startServer = async () => {
   logger.info(`Redis status: ${redis.status}`);
   logger.info(`Meilisearch status: ${meili.status}`);
 
-  // Sync database schema & run Super Admin bootstrap if database is healthy
-  if (db.status === 'healthy') {
-    try {
-      await sequelize.sync({ alter: false });
-      const qi = sequelize.getQueryInterface();
-      // Automatic Comprehensive Schema Verification for All Models & Columns
-      for (const modelName of Object.keys(sequelize.models)) {
-          const model = sequelize.models[modelName];
-          const tableName = model.getTableName();
-          let tableDesc = {};
-          try {
-            tableDesc = await qi.describeTable(tableName);
-          } catch {
-            await model.sync({ alter: true });
-            tableDesc = await qi.describeTable(tableName);
-          }
-
-          const modelAttributes = model.rawAttributes;
-          for (const [attrName, attrDef] of Object.entries(modelAttributes)) {
-            if (!tableDesc[attrName]) {
-              try {
-                await qi.addColumn(tableName, attrName, {
-                  type: attrDef.type,
-                  allowNull: attrDef.allowNull !== undefined ? attrDef.allowNull : true,
-                  defaultValue: attrDef.defaultValue !== undefined ? attrDef.defaultValue : null,
-                });
-                logger.info(`Added missing column [${attrName}] to table [${tableName}].`);
-              } catch {
-                try {
-                  await model.sync({ alter: true });
-                } catch {}
-              }
-            }
-          }
-        }
-
-      logger.info('Database schema synchronized successfully.');
-      await bootstrapSuperAdmin();
-      await syncProductDiscounts();
-    } catch (bootErr) {
-      logger.warn(`Super Admin bootstrap / sync notice: ${bootErr.message}`);
-    }
+  if (db.status !== 'healthy') {
+    throw new Error('PostgreSQL is unavailable; refusing to start the API.');
   }
+
+  await bootstrapSuperAdmin();
 
   // Initialize background workers if Redis is ready
   if (redis.status === 'healthy') {
@@ -120,6 +81,13 @@ const startServer = async () => {
       }
 
       try {
+        await closeRedis();
+        logger.info('Redis client closed.');
+      } catch (e) {
+        logger.warn(`Error closing Redis client: ${e.message}`);
+      }
+
+      try {
         await sequelize.close();
         logger.info('Database connection closed.');
       } catch (e) {
@@ -146,4 +114,3 @@ startServer().catch((error) => {
 });
 
 // ThePurple Backend API Server
-

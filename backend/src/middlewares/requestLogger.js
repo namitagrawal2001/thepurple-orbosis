@@ -7,8 +7,18 @@ const stream = {
   write: (message) => logger.info(message.trim()),
 };
 
+morgan.token('safe-url', (req) => {
+  try {
+    return new URL(req.originalUrl, 'http://localhost').pathname;
+  } catch {
+    return '[invalid-url]';
+  }
+});
+
 export const requestLogger = morgan(
-  env.isProduction ? 'combined' : ':method :url :status :res[content-length] - :response-time ms',
+  env.isProduction
+    ? ':remote-addr :method :safe-url :status :res[content-length] :response-time ms'
+    : ':method :safe-url :status :res[content-length] - :response-time ms',
   { stream }
 );
 

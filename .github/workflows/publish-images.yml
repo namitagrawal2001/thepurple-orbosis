@@ -1,0 +1,304 @@
+name: Test, scan, and publish Docker images
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: production-images-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  test-and-scan:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: thepurple_admin
+          POSTGRES_DB: thepurple_test_ci
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U thepurple_admin -d thepurple_test_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      meilisearch:
+        image: getmeili/meilisearch:v1.8
+        env:
+          MEILI_ENV: development
+          MEILI_NO_ANALYTICS: "true"
+        ports:
+          - 7700:7700
+        options: >-
+          --health-cmd "curl -f http://localhost:7700/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      PORT: 5000
+      FRONTEND_URL: http://localhost:3000
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_NAME: thepurple_test_ci
+      INTEGRATION_TEST_DATABASE: thepurple_test_ci
+      DB_ADMIN_USER: thepurple_admin
+      DB_MIGRATION_USER: thepurple_migrator
+      DB_USER: thepurple_app
+      DB_DIALECT: postgres
+      REDIS_URL: redis://localhost:6379
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      MEILISEARCH_HOST: http://localhost:7700
+      NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.example.invalid/api/v1' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Scan repository for secrets
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Review dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@ce3cf9537a52e8119d91fd484ab5b8a807627bf8 # v4.6.0
+        with:
+          fail-on-severity: high
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Generate ephemeral test credentials
+        shell: bash
+        run: |
+          {
+            echo "JWT_SECRET=$(openssl rand -hex 32)"
+            echo "ADMIN_INITIAL_EMAIL=ci-${GITHUB_RUN_ID}@example.invalid"
+            echo "ADMIN_INITIAL_PASSWORD=$(openssl rand -hex 24)"
+            echo "DB_MIGRATION_PASSWORD=$(openssl rand -hex 24)"
+            echo "DB_PASSWORD=$(openssl rand -hex 24)"
+          } >> "$GITHUB_ENV"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Audit backend dependencies
+        working-directory: backend
+        run: npm audit --audit-level=high
+
+      - name: Provision isolated database roles
+        working-directory: backend
+        run: |
+          PGPASSWORD='' psql --host=localhost --username=thepurple_admin --dbname=thepurple_test_ci \
+            --set=admin_user=thepurple_admin \
+            --set=migration_user=thepurple_migrator \
+            --set=migration_password="$DB_MIGRATION_PASSWORD" \
+            --set=app_user=thepurple_app \
+            --set=app_password="$DB_PASSWORD" \
+            --set=database_name=thepurple_test_ci \
+            --file=../scripts/provision-database-roles.sql
+
+      - name: Apply database migrations twice
+        working-directory: backend
+        run: |
+          DB_USER="$DB_MIGRATION_USER" DB_PASSWORD="$DB_MIGRATION_PASSWORD" npm run db:migrate
+          DB_USER="$DB_MIGRATION_USER" DB_PASSWORD="$DB_MIGRATION_PASSWORD" npm run db:migrate
+
+      - name: Run backend unit and integration tests
+        working-directory: backend
+        run: |
+          npm test
+          npm run test:integration
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high
+
+      - name: Lint frontend JavaScript and JSX
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Require a public production API URL before publishing
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
+        run: |
+          if [[ ! "$NEXT_PUBLIC_API_URL" =~ ^https://[^[:space:]]+/api/v1/?$ ]]; then
+            echo "::error::Set the GitHub Actions variable NEXT_PUBLIC_API_URL to your public HTTPS API URL ending in /api/v1."
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build backend image for scanning
+        run: docker buildx build --load --tag thepurple-backend:ci ./backend
+
+      - name: Scan backend image and create SBOM
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: thepurple-backend:ci
+          format: cyclonedx
+          output: backend-sbom.cdx.json
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Build frontend image for scanning
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://api.example.invalid/api/v1' }}
+          NEXT_PUBLIC_RAZORPAY_KEY_ID: ${{ vars.NEXT_PUBLIC_RAZORPAY_KEY_ID }}
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+          NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID }}
+        run: |
+          docker buildx build --load \
+            --build-arg NEXT_PUBLIC_API_URL \
+            --build-arg NEXT_PUBLIC_RAZORPAY_KEY_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN \
+            --build-arg NEXT_PUBLIC_FIREBASE_PROJECT_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET \
+            --build-arg NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_APP_ID \
+            --build-arg NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID \
+            --tag thepurple-frontend:ci ./frontend
+
+      - name: Scan frontend image and create SBOM
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: thepurple-frontend:ci
+          format: cyclonedx
+          output: frontend-sbom.cdx.json
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+      - name: Export the exact scanned images
+        run: docker save thepurple-backend:ci thepurple-frontend:ci | gzip > scanned-images.tar.gz
+
+      - name: Upload scanned images and SBOMs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: scanned-images-${{ github.run_id }}-${{ github.run_attempt }}
+          path: scanned-images.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Retain CycloneDX SBOMs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-sboms-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            backend-sbom.cdx.json
+            frontend-sbom.cdx.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  publish:
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
+    needs: test-and-scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download the exact scanned images
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: scanned-images-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Load scanned images
+        run: docker load --input scanned-images.tar.gz
+
+      - name: Attest the exact scanned image archive
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: scanned-images.tar.gz
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Prepare backend image tags
+        id: backend-meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: namitagrawal/thepurple-backend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Publish scanned backend image
+        env:
+          IMAGE_TAGS: ${{ steps.backend-meta.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [ -z "$image_tag" ] && continue
+            docker tag thepurple-backend:ci "$image_tag"
+            docker push "$image_tag"
+          done <<< "$IMAGE_TAGS"
+
+      - name: Prepare frontend image tags
+        id: frontend-meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: namitagrawal/thepurple-frontend
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Publish scanned frontend image
+        env:
+          IMAGE_TAGS: ${{ steps.frontend-meta.outputs.tags }}
+        run: |
+          while IFS= read -r image_tag; do
+            [ -z "$image_tag" ] && continue
+            docker tag thepurple-frontend:ci "$image_tag"
+            docker push "$image_tag"
+          done <<< "$IMAGE_TAGS"

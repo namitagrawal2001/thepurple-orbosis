@@ -1,5 +1,6 @@
 'use client';
 
+import { API_BASE_URL } from '@/lib/api/url';
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -182,7 +183,7 @@ export default function HomeFeaturedProducts() {
     let isMounted = true;
     async function loadFeaturedProducts() {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/products?isFeatured=true&limit=100`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.products)) {

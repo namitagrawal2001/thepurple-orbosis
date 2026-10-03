@@ -12,6 +12,7 @@ function getMailTransporter() {
       host: env.SMTP_HOST,
       port: env.SMTP_PORT || 587,
       secure: env.SMTP_PORT === 465,
+      requireTLS: env.SMTP_PORT !== 465,
       auth: {
         user: env.SMTP_USER.trim(),
         pass: env.SMTP_PASSWORD.replace(/\s+/g, ''),
@@ -19,8 +20,10 @@ function getMailTransporter() {
     });
     logger.info(`Configured SMTP transporter with host: ${env.SMTP_HOST}`);
   } else {
-    // In dev / test when SMTP is not configured, create a mock transporter or etherial
-    logger.info('SMTP credentials not configured; mail service operating in fallback logger mode.');
+    if (env.isProduction) {
+      throw new Error('SMTP credentials are required in production.');
+    }
+    logger.info('SMTP credentials are not configured; outgoing mail is disabled.');
   }
 
   return transporter;
@@ -65,13 +68,14 @@ export const mailService = {
         });
         logger.info(`Password reset email sent to ${toEmail}`);
       } catch (err) {
-        logger.error(`Failed to send password reset email via SMTP: ${err.message}`);
+        logger.error(`Failed to send password reset email via SMTP (${err.code || 'unknown error'}).`);
+        if (env.isProduction) throw new Error('Password reset email could not be sent.');
       }
     } else {
-      logger.info(`[MAIL MOCK] Password Reset Email for ${toEmail}: Reset URL = ${resetUrl}`);
+      logger.info(`[MAIL DISABLED] Password reset email not sent to ${toEmail}.`);
     }
 
-    return { sent: true, resetUrl };
+    return { sent: Boolean(transport) };
   },
 
   /**
@@ -115,12 +119,13 @@ export const mailService = {
           subject,
           html,
         });
-        logger.info(`Welcome email with temporary password sent to ${toEmail}`);
+        logger.info(`Welcome email sent to ${toEmail}`);
       } catch (err) {
-        logger.error(`Failed to send welcome email via SMTP: ${err.message}`);
+        logger.error(`Failed to send welcome email via SMTP (${err.code || 'unknown error'}).`);
+        if (env.isProduction) throw new Error('Admin welcome email could not be sent.');
       }
     } else {
-      logger.info(`[MAIL MOCK] Welcome Email for ${toEmail} (${role}): Temp Password = ${temporaryPassword}`);
+      logger.info(`[MAIL DISABLED] Admin welcome email not sent to ${toEmail} (${role}).`);
     }
 
     return { sent: true };
@@ -203,10 +208,11 @@ export const mailService = {
         });
         logger.info(`Contact query reply email sent successfully to ${toEmail}`);
       } catch (err) {
-        logger.error(`Failed to send contact query reply email via SMTP: ${err.message}`);
+        logger.error(`Failed to send contact query reply email via SMTP (${err.code || 'unknown error'}).`);
+        if (env.isProduction) throw new Error('Contact reply email could not be sent.');
       }
     } else {
-      logger.info(`[MAIL MOCK] Contact Query Reply for ${toEmail}: Subject="${emailSubject}", Message="${replyMessage}"`);
+      logger.info(`[MAIL DISABLED] Contact reply email not sent to ${toEmail}.`);
     }
 
     return { sent: true };
@@ -250,10 +256,11 @@ export const mailService = {
         });
         logger.info(`Contact received confirmation sent to ${toEmail}`);
       } catch (err) {
-        logger.error(`Failed to send contact confirmation email via SMTP: ${err.message}`);
+        logger.error(`Failed to send contact confirmation email via SMTP (${err.code || 'unknown error'}).`);
+        if (env.isProduction) throw new Error('Contact confirmation email could not be sent.');
       }
     } else {
-      logger.info(`[MAIL MOCK] Contact Query Received Confirmation for ${toEmail}`);
+      logger.info(`[MAIL DISABLED] Contact confirmation email not sent to ${toEmail}.`);
     }
 
     return { sent: true };

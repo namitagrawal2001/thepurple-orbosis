@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs';
-import * as XLSX from 'xlsx';
+import { Readable } from 'node:stream';
 import { Op } from 'sequelize';
 import sequelize from '../config/database.js';
 import {
@@ -405,15 +405,46 @@ export const bulkImportService = {
   /**
    * Parse uploaded Excel or CSV buffer to structured array of rows
    */
-  parseFileBuffer(buffer) {
+  async parseFileBuffer(buffer) {
     try {
-      const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true });
-      const firstSheetName = wb.SheetNames[0];
-      if (!firstSheetName) {
-        throw new Error('The uploaded file does not contain any sheets');
+      const workbook = new ExcelJS.Workbook();
+      let worksheet;
+
+      if (buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04]))) {
+        await workbook.xlsx.load(buffer);
+        worksheet = workbook.worksheets[0];
+      } else {
+        worksheet = await workbook.csv.read(Readable.from([buffer]));
       }
-      const ws = wb.Sheets[firstSheetName];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (!worksheet) {
+        throw new Error('The uploaded file does not contain any worksheets');
+      }
+
+      const headers = worksheet.getRow(1).values.slice(1);
+      if (!headers.length || headers.every((header) => !header)) {
+        throw new Error('The first row must contain column headers');
+      }
+
+      const rows = [];
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+
+        const values = {};
+        headers.forEach((header, index) => {
+          if (!header) return;
+          let value = row.getCell(index + 1).value;
+          if (value && typeof value === 'object') {
+            if ('result' in value) value = value.result;
+            else if ('text' in value) value = value.text;
+            else if ('richText' in value) value = value.richText.map((part) => part.text).join('');
+            else value = row.getCell(index + 1).text;
+          }
+          values[String(header)] = value ?? '';
+        });
+        rows.push(values);
+      });
+
       return rows;
     } catch (err) {
       throw AppError.badRequest(`Failed to parse Excel/CSV file: ${err.message}`);

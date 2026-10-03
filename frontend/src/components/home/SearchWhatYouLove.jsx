@@ -1,5 +1,6 @@
 'use client';
 
+import { API_BASE_URL } from '@/lib/api/url';
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -167,7 +168,7 @@ export default function SearchWhatYouLove() {
     let isMounted = true;
     async function loadBackendProducts() {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/products?limit=50`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.products) && json.data.products.length > 0 && isMounted) {

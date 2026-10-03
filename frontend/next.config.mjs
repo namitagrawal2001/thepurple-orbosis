@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   reactStrictMode: false,
   poweredByHeader: false,
   images: {
@@ -36,4 +37,3 @@ const nextConfig = {
 };
 
 export default nextConfig;
-

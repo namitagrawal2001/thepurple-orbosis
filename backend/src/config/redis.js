@@ -1,46 +1,51 @@
 import Redis from 'ioredis';
+import { readFileSync } from 'node:fs';
 import env from './env.js';
 import logger from './logger.js';
 
 let redisClient = null;
 
+const getRedisPassword = () => {
+  if (env.REDIS_PASSWORD_FILE) {
+    return readFileSync(env.REDIS_PASSWORD_FILE, 'utf8').trim();
+  }
+  return env.REDIS_PASSWORD;
+};
+
 export const getRedisOptions = () => {
+  const password = getRedisPassword();
   if (env.REDIS_URL && (env.REDIS_URL.startsWith('redis://') || env.REDIS_URL.startsWith('rediss://'))) {
-    try {
-      const parsed = new URL(env.REDIS_URL);
-      const isTls = parsed.protocol === 'rediss:';
-      return {
-        host: parsed.hostname,
-        port: parseInt(parsed.port || '6379', 10),
-        username: parsed.username || undefined,
-        password: parsed.password || undefined,
-        tls: isTls ? { rejectUnauthorized: false } : undefined,
-        maxRetriesPerRequest: null, // Required by BullMQ
-        enableReadyCheck: false,
-        retryStrategy(times) {
-          if (times > 3) {
-            return null; // Stop reconnecting after 3 attempts
-          }
-          return Math.min(times * 200, 1000);
-        },
-        reconnectOnError(err) {
-          const targetError = 'READONLY';
-          if (err.message.includes(targetError)) {
-            return true;
-          }
-          return false;
-        },
-        lazyConnect: true,
-      };
-    } catch {
-      // Fall through to standard options
-    }
+    const parsed = new URL(env.REDIS_URL);
+    const isTls = parsed.protocol === 'rediss:';
+    return {
+      host: parsed.hostname,
+      port: parseInt(parsed.port || '6379', 10),
+      username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+      password: parsed.password ? decodeURIComponent(parsed.password) : password,
+      tls: isTls ? {} : undefined,
+      connectTimeout: 5000,
+      commandTimeout: 5000,
+      maxRetriesPerRequest: null, // Required by BullMQ
+      enableReadyCheck: false,
+      retryStrategy(times) {
+        if (times > 3) {
+          return null; // Stop reconnecting after 3 attempts
+        }
+        return Math.min(times * 200, 1000);
+      },
+      reconnectOnError(err) {
+        return err.message.includes('READONLY');
+      },
+      lazyConnect: true,
+    };
   }
 
   return {
     host: env.REDIS_HOST || 'localhost',
     port: env.REDIS_PORT || 6379,
-    password: env.REDIS_PASSWORD || undefined,
+    password,
+    connectTimeout: 5000,
+    commandTimeout: 5000,
     maxRetriesPerRequest: null, // Required by BullMQ
     enableReadyCheck: false,
     retryStrategy(times) {
@@ -63,12 +68,7 @@ export const getRedisOptions = () => {
 export const getRedisClient = () => {
   if (!redisClient) {
     if (env.REDIS_URL && (env.REDIS_URL.startsWith('redis://') || env.REDIS_URL.startsWith('rediss://'))) {
-      const isTls = env.REDIS_URL.startsWith('rediss://');
-      redisClient = new Redis(env.REDIS_URL, {
-        tls: isTls ? { rejectUnauthorized: false } : undefined,
-        maxRetriesPerRequest: null,
-        lazyConnect: true,
-      });
+      redisClient = new Redis(env.REDIS_URL, getRedisOptions());
     } else {
       const options = getRedisOptions();
       redisClient = new Redis(options);
@@ -115,6 +115,16 @@ export const checkRedisHealth = async () => {
       error: error.message,
     };
   }
+};
+
+export const closeRedis = async () => {
+  if (!redisClient || redisClient.status === 'end') return;
+  if (redisClient.status === 'ready') {
+    await redisClient.quit();
+  } else {
+    redisClient.disconnect();
+  }
+  redisClient = null;
 };
 
 export default getRedisClient;

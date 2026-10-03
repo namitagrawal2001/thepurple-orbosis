@@ -3,7 +3,9 @@
  * Enforces Login requirement before adding/toggling interests
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+import { API_BASE_URL } from '@/lib/api/url';
+
+const API_URL = API_BASE_URL;
 const STORAGE_KEY = 'thepurple_interested_products';
 
 export const getStoredCustomerToken = () => {

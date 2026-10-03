@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { API_BASE_URL } from '@/lib/api/url';
 
 const STORAGE_KEY = 'thepurple_interested_products';
 const GUEST_ID_KEY = 'thepurple_guest_id';
@@ -72,7 +73,7 @@ export const fetchWishlist = createAsyncThunk(
   'wishlist/fetchWishlist',
   async (_, { rejectWithValue }) => {
     const { headers, guestId } = getWishlistHeaders();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+    const apiUrl = API_BASE_URL;
 
     try {
       const res = await fetch(`${apiUrl}/interests/my?guestId=${encodeURIComponent(guestId)}`, {
@@ -143,7 +144,7 @@ export const toggleWishlistProduct = createAsyncThunk(
     const prodId = String(product.id || product.productId);
 
     const { headers, guestId } = getWishlistHeaders();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+    const apiUrl = API_BASE_URL;
 
     try {
       const res = await fetch(`${apiUrl}/interests/toggle`, {
@@ -178,7 +179,7 @@ export const removeWishlistProduct = createAsyncThunk(
   'wishlist/removeProduct',
   async ({ id, productId }, { rejectWithValue }) => {
     const { headers, guestId } = getWishlistHeaders();
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+    const apiUrl = API_BASE_URL;
 
     try {
       if (id && !String(id).startsWith('local-')) {

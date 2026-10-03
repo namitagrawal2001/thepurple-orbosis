@@ -6,8 +6,8 @@
 class ShiprocketService {
   constructor() {
     this.baseUrl = 'https://apiv2.shiprocket.in/v1/external';
-    this.email = process.env.SHIPROCKET_EMAIL || 'solutions@abhi.services'
-    this.password = process.env.SHIPROCKET_PASSWORD || '!b79u2ybjMD5AYpv!7DqGNH@ecD1^p4A';
+    this.email = process.env.SHIPROCKET_EMAIL;
+    this.password = process.env.SHIPROCKET_PASSWORD;
     this.token = null;
     this.tokenExpiry = null;
     this.primaryPickupPincode = '140301';
@@ -23,13 +23,15 @@ class ShiprocketService {
         return this.token;
       }
 
-      const email = process.env.SHIPROCKET_EMAIL || this.email;
-      const password = process.env.SHIPROCKET_PASSWORD || this.password;
+      if (!this.email || !this.password) {
+        console.warn('Shiprocket credentials are not configured.');
+        return null;
+      }
 
       const response = await fetch(`${this.baseUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: this.email, password: this.password }),
       });
 
       const data = await response.json();

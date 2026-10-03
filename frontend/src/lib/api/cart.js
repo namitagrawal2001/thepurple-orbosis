@@ -1,7 +1,9 @@
 import { getStoredCustomerToken } from '@/lib/auth/session';
 
 const CART_SESSION_KEY = 'thepurple_cart_session_id';
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
+import { API_BASE_URL } from '@/lib/api/url';
+
+const API_URL = API_BASE_URL;
 
 export const getCartSessionId = () => {
   if (typeof window === 'undefined') return 'guest_session_init';

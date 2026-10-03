@@ -285,8 +285,13 @@ export default function CheckoutPage() {
       });
 
       // 3. Launch Razorpay Modal
+      const razorpayKeyId = intentData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+      if (!razorpayKeyId) {
+        throw new Error('Payments are not configured for this deployment. Please contact support.');
+      }
+
       const options = {
-        key: intentData.keyId || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_T54rFRRURtKx41',
+        key: razorpayKeyId,
         amount: intentData.amount,
         currency: intentData.currency || 'INR',
         name: 'ThePurple Jewellery',

@@ -51,7 +51,6 @@ export const createSequelizeInstance = () => {
       ? {
           ssl: {
             require: true,
-            rejectUnauthorized: false,
           },
         }
       : {}),

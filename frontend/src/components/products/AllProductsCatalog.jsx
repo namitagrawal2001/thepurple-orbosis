@@ -1,5 +1,6 @@
 'use client';
 
+import { API_BASE_URL } from '@/lib/api/url';
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -273,7 +274,7 @@ export default function AllProductsCatalog({
     let isMounted = true;
     async function loadFilterTaxonomy() {
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/products/filters`);
         const json = await res.json();
         if (json.success && isMounted) {
@@ -301,7 +302,7 @@ export default function AllProductsCatalog({
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+      const apiUrl = API_BASE_URL;
       const params = new URLSearchParams();
       params.set('page', pageToFetch);
       params.set('limit', ITEMS_PER_PAGE);
@@ -2142,5 +2143,4 @@ export default function AllProductsCatalog({
     </div>
   );
 }
-
 

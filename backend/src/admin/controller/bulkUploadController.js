@@ -29,8 +29,8 @@ function extractUploadFiles(req) {
     excelFile = req.file;
   } else if (req.files) {
     if (Array.isArray(req.files)) {
-      excelFile = req.files.find((f) => /\.(xlsx|xls|csv)$/i.test(f.originalname));
-      imageFiles = req.files.filter((f) => !/\.(xlsx|xls|csv)$/i.test(f.originalname));
+      excelFile = req.files.find((f) => /\.(xlsx|csv)$/i.test(f.originalname));
+      imageFiles = req.files.filter((f) => !/\.(xlsx|csv)$/i.test(f.originalname));
     } else {
       if (req.files.file && req.files.file.length > 0) {
         excelFile = req.files.file[0];
@@ -69,7 +69,7 @@ export const validateBulkFile = asyncHandler(async (req, res) => {
     throw AppError.badRequest('No Excel or CSV file uploaded');
   }
 
-  const rows = bulkImportService.parseFileBuffer(excelFile.buffer);
+  const rows = await bulkImportService.parseFileBuffer(excelFile.buffer);
   const validationResult = await bulkImportService.validateRows(rows, imageFiles);
 
   return ApiResponse.success(
@@ -111,7 +111,7 @@ export const executeBulkImport = asyncHandler(async (req, res) => {
     throw AppError.badRequest('No spreadsheet file uploaded for import');
   }
 
-  const rows = bulkImportService.parseFileBuffer(excelFile.buffer);
+  const rows = await bulkImportService.parseFileBuffer(excelFile.buffer);
   const validationResult = await bulkImportService.validateRows(rows, imageFiles);
 
   if (validationResult.validCount === 0) {

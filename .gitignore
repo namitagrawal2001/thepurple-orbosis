@@ -45,4 +45,7 @@ Thumbs.db
 # Testing
 coverage/
 
+# Local production data and secrets
+/backups/
+/secrets/
 

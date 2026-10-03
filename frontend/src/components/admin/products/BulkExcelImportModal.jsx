@@ -328,13 +328,13 @@ export default function BulkExcelImportModal({ open, onClose, onImportComplete, 
                     {selectedFile ? selectedFile.name : '1. Select Product Excel File*'}
                   </div>
                   <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px', marginBottom: '14px' }}>
-                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Supports .xlsx, .xls, or .csv'}
+                    {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : 'Supports .xlsx or .csv'}
                   </div>
                   <label className="admin-btn admin-btn-primary" style={{ cursor: 'pointer', display: 'inline-flex', padding: '7px 14px', fontSize: '12.5px' }}>
                     <span>{selectedFile ? 'Change Excel File' : 'Browse Excel File'}</span>
                     <input
                       type="file"
-                      accept=".xlsx,.xls,.csv"
+                      accept=".xlsx,.csv"
                       onChange={handleFileChange}
                       style={{ display: 'none' }}
                     />

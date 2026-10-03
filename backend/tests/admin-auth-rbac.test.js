@@ -1,18 +1,63 @@
-import assert from 'assert';
-import request from 'supertest';
-import { createApp } from '../src/app.js';
-import { bootstrapSuperAdmin } from '../src/seeders/bootstrapAdmin.js';
-import { Admin, Product, Category, Subcategory, Color, Size } from '../src/models/index.js';
-import bulkImportService from '../src/services/bulkImportService.js';
-import env from '../src/config/env.js';
+import assert from 'node:assert/strict';
+
+const testDatabase = process.env.DB_NAME || '';
+if (
+  process.env.NODE_ENV !== 'test' ||
+  process.env.INTEGRATION_TEST_DATABASE !== testDatabase ||
+  !/^thepurple_test_[a-z0-9_]+$/.test(testDatabase) ||
+  process.env.DATABASE_URL ||
+  !['localhost', '127.0.0.1'].includes(process.env.DB_HOST)
+) {
+  console.error(
+    'Integration tests require NODE_ENV=test, a matching INTEGRATION_TEST_DATABASE named thepurple_test_*, a loopback DB_HOST, and no DATABASE_URL.'
+  );
+  process.exit(1);
+}
+
+const [
+  { default: request },
+  { createApp },
+  { bootstrapSuperAdmin },
+  { default: sequelize },
+  { Product },
+  { default: bulkImportService },
+  { default: env },
+  { default: mailService },
+  { default: jwt },
+] = await Promise.all([
+  import('supertest'),
+  import('../src/app.js'),
+  import('../src/seeders/bootstrapAdmin.js'),
+  import('../src/config/database.js'),
+  import('../src/models/index.js'),
+  import('../src/services/bulkImportService.js'),
+  import('../src/config/env.js'),
+  import('../src/services/mailService.js'),
+  import('jsonwebtoken'),
+]);
+
+const welcomePasswords = new Map();
+mailService.sendWelcomeAdminEmail = async ({ toEmail, temporaryPassword }) => {
+  welcomePasswords.set(toEmail, temporaryPassword);
+  return { sent: true };
+};
 
 async function runTests() {
   console.log('=== STARTING THEPURPLE ADMIN AUTH & RBAC TEST SUITE ===\n');
 
   const app = createApp();
 
+  const livenessRes = await request(app).get('/api/v1/health/live');
+  assert.strictEqual(livenessRes.status, 200, 'Liveness endpoint should respond while the process is running');
+  assert.strictEqual(livenessRes.body.data.status, 'alive');
+
+  const readinessRes = await request(app).get('/api/v1/health/ready');
+  assert.strictEqual(readinessRes.status, 200, 'Readiness endpoint should require healthy dependencies');
+  assert.strictEqual(readinessRes.body.data.status, 'ready');
+
   // 1. Test Super Admin Bootstrap
   console.log('[1/7] Testing Super Admin Bootstrap...');
+  await sequelize.sync({ alter: false });
   const bootstrapAdmin = await bootstrapSuperAdmin();
   assert.ok(bootstrapAdmin, 'Super Admin should be bootstrapped');
   assert.strictEqual(bootstrapAdmin.role, 'SUPER_ADMIN', 'Bootstrapped admin role must be SUPER_ADMIN');
@@ -30,7 +75,32 @@ async function runTests() {
   assert.strictEqual(superAdminLoginRes.status, 200, `Login should return 200, got: ${superAdminLoginRes.status} ${JSON.stringify(superAdminLoginRes.body)}`);
   assert.ok(superAdminLoginRes.body.data.token, 'Response must contain token');
   assert.strictEqual(superAdminLoginRes.body.data.admin.role, 'SUPER_ADMIN');
-  const superAdminToken = superAdminLoginRes.body.data.token;
+  const tokenWithoutSession = jwt.sign(
+    { id: superAdminLoginRes.body.data.admin.id, type: 'admin' },
+    env.JWT_SECRET
+  );
+  const missingSessionRes = await request(app)
+    .get('/api/v1/admin/auth/me')
+    .set('Authorization', `Bearer ${tokenWithoutSession}`);
+  assert.strictEqual(missingSessionRes.status, 419, 'Admin tokens without a persisted session must be rejected');
+  let superAdminToken = superAdminLoginRes.body.data.token;
+  if (superAdminLoginRes.body.data.admin.mustChangePassword) {
+    const blockedAdminAction = await request(app)
+      .get('/api/v1/admin/admins')
+      .set('Authorization', `Bearer ${superAdminToken}`);
+    assert.strictEqual(
+      blockedAdminAction.status,
+      403,
+      'Admin API access must be blocked until the initial password is changed'
+    );
+
+    superAdminToken = await changeAdminPassword(
+      app,
+      superAdminToken,
+      env.ADMIN_INITIAL_PASSWORD || '123456'
+    );
+    console.log('✔ Initial Super Admin password change required and completed.');
+  }
   console.log('✔ Super Admin login succeeded. Token generated.');
 
   // 3. Test Super Admin creating Manager and Worker accounts
@@ -50,8 +120,9 @@ async function runTests() {
     });
 
   assert.strictEqual(createManagerRes.status, 201, `Create Manager should return 201, got ${createManagerRes.status}`);
-  const managerTempPassword = createManagerRes.body.data.debugTemporaryPassword;
+  const managerTempPassword = welcomePasswords.get(managerEmail);
   assert.ok(managerTempPassword, 'Temporary password should be auto-generated');
+  assert.ok(!createManagerRes.body.data.debugTemporaryPassword, 'Temporary password must not be returned by the API');
   console.log('✔ Manager account created with temporary password.');
 
   // Create Worker
@@ -65,8 +136,9 @@ async function runTests() {
     });
 
   assert.strictEqual(createWorkerRes.status, 201, `Create Worker should return 201, got ${createWorkerRes.status}`);
-  const workerTempPassword = createWorkerRes.body.data.debugTemporaryPassword;
+  const workerTempPassword = welcomePasswords.get(workerEmail);
   assert.ok(workerTempPassword, 'Temporary password should be auto-generated');
+  assert.ok(!createWorkerRes.body.data.debugTemporaryPassword, 'Temporary password must not be returned by the API');
   console.log('✔ Worker account created with temporary password.');
 
   // Manager Login
@@ -74,7 +146,11 @@ async function runTests() {
     .post('/api/v1/admin/auth/login')
     .send({ email: managerEmail, password: managerTempPassword });
   assert.strictEqual(managerLoginRes.status, 200);
-  const managerToken = managerLoginRes.body.data.token;
+  const managerToken = await changeAdminPassword(
+    app,
+    managerLoginRes.body.data.token,
+    managerTempPassword
+  );
   console.log('✔ Manager login with auto-generated temporary password succeeded.');
 
   // Worker Login
@@ -82,7 +158,11 @@ async function runTests() {
     .post('/api/v1/admin/auth/login')
     .send({ email: workerEmail, password: workerTempPassword });
   assert.strictEqual(workerLoginRes.status, 200);
-  const workerToken = workerLoginRes.body.data.token;
+  const workerToken = await changeAdminPassword(
+    app,
+    workerLoginRes.body.data.token,
+    workerTempPassword
+  );
   console.log('✔ Worker login with auto-generated temporary password succeeded.');
 
   // 4. Test Role Permission Matrix Enforcements (Backend 403 checks)
@@ -221,7 +301,7 @@ async function runTests() {
 
   // 7. Test Bulk Import Validation & Template Generation
   console.log('\n[7/7] Testing Bulk Product Import Validation...');
-  const templateBuffer = bulkImportService.generateTemplate();
+  const templateBuffer = await bulkImportService.generateTemplate();
   assert.ok(templateBuffer && templateBuffer.length > 0, 'Excel template buffer must be generated');
   console.log('✔ Generated sample Excel template buffer (size:', templateBuffer.length, 'bytes)');
 
@@ -267,6 +347,25 @@ async function runTests() {
   console.log('✨ ALL 7 TEST SUITES PASSED FLAWLESSLY! ✨');
   console.log('======================================================\n');
   process.exit(0);
+}
+
+async function changeAdminPassword(app, token, currentPassword) {
+  const newPassword = `CI-Changed-${Date.now()}-Secure!`;
+  const response = await request(app)
+    .post('/api/v1/admin/auth/change-password')
+    .set('Authorization', `Bearer ${token}`)
+    .send({
+      currentPassword,
+      newPassword,
+      confirmPassword: newPassword,
+    });
+
+  assert.strictEqual(
+    response.status,
+    200,
+    `Initial password change should return 200, got: ${response.status}`
+  );
+  return response.body.data.token || token;
 }
 
 runTests().catch((err) => {

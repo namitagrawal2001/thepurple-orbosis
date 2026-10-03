@@ -1,5 +1,6 @@
 'use client';
 
+import { API_BASE_URL } from '@/lib/api/url';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -200,7 +201,7 @@ export default function CartPage() {
     async function fetchDynamicRecommendations() {
       try {
         setLoadingRecommendations(true);
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+        const apiUrl = API_BASE_URL;
         const res = await fetch(`${apiUrl}/products?limit=12&isFeatured=true`);
         const json = await res.json();
         if (json.success && Array.isArray(json.data?.products) && isMounted) {

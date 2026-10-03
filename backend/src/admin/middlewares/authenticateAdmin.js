@@ -5,6 +5,12 @@ import env from '../../config/env.js';
 import AppError from '../../utils/customError.js';
 import asyncHandler from '../../utils/asyncHandler.js';
 
+const passwordChangeAllowedRoutes = new Set([
+  'GET /auth/me',
+  'POST /auth/change-password',
+  'POST /auth/logout',
+]);
+
 export const authenticateAdmin = asyncHandler(async (req, res, next) => {
   let token = null;
 
@@ -35,6 +41,13 @@ export const authenticateAdmin = asyncHandler(async (req, res, next) => {
       return next(AppError.forbidden('Administrator account has been disabled. Please contact Super Admin.'));
     }
 
+    if (
+      admin.mustChangePassword &&
+      !passwordChangeAllowedRoutes.has(`${req.method} ${req.path}`)
+    ) {
+      return next(AppError.forbidden('You must change your password before using the admin API.'));
+    }
+
     // Verify session has not been revoked
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const session = await AdminSession.findOne({
@@ -44,7 +57,7 @@ export const authenticateAdmin = asyncHandler(async (req, res, next) => {
       },
     });
 
-    if (session && session.revokedAt) {
+    if (!session || session.revokedAt || new Date(session.expiresAt) <= new Date()) {
       return next(AppError.unauthorized('Session has been invalidated. Please log in again.'));
     }
 

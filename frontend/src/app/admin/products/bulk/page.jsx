@@ -196,7 +196,7 @@ export default function BulkProductUploadPage() {
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
-            accept=".xlsx, .xls, .csv"
+            accept=".xlsx, .csv"
             style={{ display: 'none' }}
           />
           <div style={{
@@ -216,7 +216,7 @@ export default function BulkProductUploadPage() {
             Click to choose or drop your Excel/CSV file here
           </h3>
           <p style={{ fontSize: '13px', color: '#6B7280', margin: 0 }}>
-            Supports .xlsx, .xls, and .csv files up to 25MB (300+ products per file)
+            Supports .xlsx and .csv files up to 25MB (300+ products per file)
           </p>
         </div>
       )}

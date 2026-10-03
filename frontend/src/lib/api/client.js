@@ -1,7 +1,8 @@
 import { getAccessToken } from '@/lib/auth/session';
 import { notify } from '@/lib/notify';
+import { API_BASE_URL } from '@/lib/api/url';
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1').replace(/\/$/, '');
+const API_URL = API_BASE_URL;
 
 export class ApiError extends Error {
   constructor(message, status, errors = []) {
